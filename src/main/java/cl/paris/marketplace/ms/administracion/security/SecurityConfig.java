@@ -26,13 +26,18 @@ public class SecurityConfig {
         http
             .csrf(AbstractHttpConfigurer::disable)
             .authorizeHttpRequests(auth -> auth
-                // Absolutamente todas las peticiones a la administración requieren estar autenticadas
+                .requestMatchers("/error",
+                                 "/v3/api-docs",
+                                 "/v3/api-docs/**",
+                                 "/swagger-ui/**",
+                                 "/swagger-ui.html",
+                                 "/doc/swagger-ui/**",
+                                 "/doc/swagger-ui.html/**").permitAll() 
                 .anyRequest().authenticated()
             )
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
-            // Posicionamos el filtro JWT antes del filtro de usuario/contraseña estándar
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
  
         return http.build();
