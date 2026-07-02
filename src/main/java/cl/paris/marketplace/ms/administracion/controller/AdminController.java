@@ -1,157 +1,84 @@
-package cl.paris.marketplace.ms.administracion.service;
+package cl.paris.marketplace.ms.administracion.controller;
 
 import java.util.List;
 import java.util.UUID;
 
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-import cl.paris.marketplace.ms.administracion.client.ProductoClient;
-import cl.paris.marketplace.ms.administracion.client.ProveedorClient;
-import cl.paris.marketplace.ms.administracion.client.UsuarioClient;
 import cl.paris.marketplace.ms.administracion.dto.ActualizarEstadoDocumentoRequest;
 import cl.paris.marketplace.ms.administracion.dto.AdminAccionRequest;
 import cl.paris.marketplace.ms.administracion.dto.AdminAccionResponse;
 import cl.paris.marketplace.ms.administracion.dto.EstadoUsuarioRequest;
 import cl.paris.marketplace.ms.administracion.dto.ModerarProductoRequest;
-import cl.paris.marketplace.ms.administracion.mapper.AdminMapper;
-import cl.paris.marketplace.ms.administracion.model.LogAuditoria;
-import cl.paris.marketplace.ms.administracion.repository.LogAuditoriaRepository;
+import cl.paris.marketplace.ms.administracion.service.AdminService;
+import jakarta.validation.Valid;
 
-@Service
-public class AdminService {
+@RestController
+@RequestMapping("/api/admin")
+public class AdminController {
 
-    private final LogAuditoriaRepository logRepository;
-    private final AdminMapper adminMapper;
-    private final ProductoClient productoClient;
-    private final UsuarioClient usuarioClient;
-    private final ProveedorClient proveedorClient;
+    private final AdminService adminService;
 
-    public AdminService(
-            LogAuditoriaRepository logRepository, 
-            AdminMapper adminMapper,
-            ProductoClient productoClient,
-            UsuarioClient usuarioClient,
-            ProveedorClient proveedorClient) {
-        this.logRepository = logRepository;
-        this.adminMapper = adminMapper;
-        this.productoClient = productoClient;
-        this.usuarioClient = usuarioClient;
-        this.proveedorClient = proveedorClient;
+    public AdminController(AdminService adminService) {
+        this.adminService = adminService;
     }
 
-    @Transactional
-    public AdminAccionResponse registrarAccionManual(AdminAccionRequest request, UUID adminId) {
-        if (request.accion() == null || request.accion().trim().isEmpty()) {
-            throw new RuntimeException("El tipo de acción de auditoría no puede estar vacío.");
-        }
-
-        LogAuditoria log = adminMapper.toEntity(request);
-        log.setUsuarioId(adminId); 
-        
-        LogAuditoria logGuardado = logRepository.save(log);
-        return adminMapper.toResponse(logGuardado);
+    @PostMapping("/acciones")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<AdminAccionResponse> registrarAccionManual(
+            @Valid @RequestBody AdminAccionRequest request,
+            Authentication authentication) {
+        UUID adminId = UUID.fromString(authentication.getCredentials().toString());
+        return ResponseEntity.ok(adminService.registrarAccionManual(request, adminId));
     }
 
-    @Transactional(readOnly = true)
-    public List<AdminAccionResponse> listarHistorial() {
-        return logRepository.findAll().stream()
-                .map(adminMapper::toResponse)
-                .toList(); 
+    @GetMapping("/acciones")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<List<AdminAccionResponse>> listarHistorial() {
+        return ResponseEntity.ok(adminService.listarHistorial());
     }
 
-    @Transactional(readOnly = true)
-    public List<AdminAccionResponse> listarPorUsuarioAdmin(UUID usuarioId) {
-        List<LogAuditoria> logs = logRepository.findByUsuarioIdOrderByFechaAccionDesc(usuarioId);
-        if (logs.isEmpty()) {
-            throw new RuntimeException("No se encontraron registros de auditoría para el administrador especificado.");
-        }
-        return logs.stream().map(adminMapper::toResponse).toList();
+    @GetMapping("/acciones/usuario/{usuarioId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<List<AdminAccionResponse>> listarPorUsuarioAdmin(
+            @PathVariable UUID usuarioId) {
+        return ResponseEntity.ok(adminService.listarPorUsuarioAdmin(usuarioId));
     }
 
-   @Transactional
-    public AdminAccionResponse moderarProducto(ModerarProductoRequest request, UUID adminId) {
-        String estadoUpper = request.estado().toUpperCase();
-        if (!estadoUpper.equals("APROBADO") && !estadoUpper.equals("RECHAZADO")) {
-            throw new RuntimeException("Estado de moderación inválido. Debe ser 'APROBADO' o 'RECHAZADO'.");
-        }
-
-       try {
-            productoClient.actualizarEstadoModeracion(request.productoId(), estadoUpper);
-        } catch (Exception e) { 
-            System.err.println("=== ERROR INESPERADO AL LLAMAR A MS-PRODUCTOS ===");
-            System.err.println("Clase del error: " + e.getClass().getName());
-            System.err.println("Mensaje: " + e.getMessage());
-            e.printStackTrace(); 
-            throw new RuntimeException("Fallo al intentar aplicar la moderación. Revisa la consola.");
-        }
-
-
-        String detalleLog = String.format("El administrador cambió el estado del producto ID [%s] a [%s]. Motivo: %s", 
-                request.productoId(), estadoUpper, request.motivo());
-
-        LogAuditoria log = new LogAuditoria();
-        log.setUsuarioId(adminId);
-        log.setAccion("MODERAR_PRODUCTO");
-        log.setDetalle(detalleLog);
-
-        LogAuditoria guardado = logRepository.save(log);
-        return adminMapper.toResponse(guardado);
+    @PutMapping("/productos/moderar")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<AdminAccionResponse> moderarProducto(
+            @Valid @RequestBody ModerarProductoRequest request,
+            Authentication authentication) {
+        UUID adminId = UUID.fromString(authentication.getCredentials().toString());
+        return ResponseEntity.ok(adminService.moderarProducto(request, adminId));
     }
 
-   @Transactional
-    public AdminAccionResponse cambiarEstadoUsuario(EstadoUsuarioRequest request, UUID adminId) {
-
-       try {
-            usuarioClient.actualizarEstadoBaneo(request.usuarioId(), request.baneo());
-        } catch (Exception e) { 
-            System.err.println("=== ERROR INESPERADO AL LLAMAR A MS-USUARIOS ===");
-            System.err.println("Clase del error: " + e.getClass().getName());
-            System.err.println("Mensaje: " + e.getMessage());
-            e.printStackTrace();
-            throw new RuntimeException("Fallo al intentar cambiar el estado del usuario.");
-        }
-
-        String accionTipo = request.baneo() ? "BANEAR_USUARIO" : "ACTIVAR_USUARIO";
-        String detalleLog = String.format("El administrador aplicó [%s] al usuario ID [%s]. Razón: %s", 
-                accionTipo, request.usuarioId(), request.razon());
-
-        LogAuditoria log = new LogAuditoria();
-        log.setUsuarioId(adminId);
-        log.setAccion(accionTipo);
-        log.setDetalle(detalleLog);
-
-        LogAuditoria guardado = logRepository.save(log);
-        return adminMapper.toResponse(guardado);
+    @PutMapping("/usuarios/estado")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<AdminAccionResponse> cambiarEstadoUsuario(
+            @Valid @RequestBody EstadoUsuarioRequest request,
+            Authentication authentication) {
+        UUID adminId = UUID.fromString(authentication.getCredentials().toString());
+        return ResponseEntity.ok(adminService.cambiarEstadoUsuario(request, adminId));
     }
 
-    @Transactional
-    public AdminAccionResponse actualizarEstadoDocumento(UUID documentoId, ActualizarEstadoDocumentoRequest request, UUID adminId) {
-        String estadoUpper = request.estado().toUpperCase();
-        
-        if (!estadoUpper.equals("APROBADO") && !estadoUpper.equals("RECHAZADO") && !estadoUpper.equals("PENDIENTE")) {
-            throw new RuntimeException("Estado de documento inválido.");
-        }
-
-        try {
-            proveedorClient.actualizarEstadoDocumento(documentoId, request);
-        } catch (Exception e) { 
-            System.err.println("=== ERROR INESPERADO AL LLAMAR A MS-PROVEEDORES ===");
-            System.err.println("Clase del error: " + e.getClass().getName());
-            System.err.println("Mensaje: " + e.getMessage());
-            e.printStackTrace(); 
-            throw new RuntimeException("Fallo al intentar aplicar el cambio de estado del documento. Revisa la consola.");
-        }
-
-        String detalleLog = String.format("El administrador cambió el estado del documento ID [%s] a [%s].", 
-                documentoId, estadoUpper);
-
-        LogAuditoria log = new LogAuditoria();
-        log.setUsuarioId(adminId);
-        log.setAccion("MODERAR_DOCUMENTO");
-        log.setDetalle(detalleLog);
-
-        LogAuditoria guardado = logRepository.save(log);
-        return adminMapper.toResponse(guardado);
+    @PutMapping("/documentos/{documentoId}/estado")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<AdminAccionResponse> actualizarEstadoDocumento(
+            @PathVariable UUID documentoId,
+            @Valid @RequestBody ActualizarEstadoDocumentoRequest request,
+            Authentication authentication) {
+        UUID adminId = UUID.fromString(authentication.getCredentials().toString());
+        return ResponseEntity.ok(adminService.actualizarEstadoDocumento(documentoId, request, adminId));
     }
 }
