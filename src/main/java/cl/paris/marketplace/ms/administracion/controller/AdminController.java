@@ -1,111 +1,157 @@
-package cl.paris.marketplace.ms.administracion.controller;
- 
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication; 
-import org.springframework.web.bind.annotation.*;
- 
-import cl.paris.marketplace.ms.administracion.dto.AdminAccionRequest;
-import cl.paris.marketplace.ms.administracion.dto.AdminAccionResponse;
-import cl.paris.marketplace.ms.administracion.dto.ModerarProductoRequest;
-import cl.paris.marketplace.ms.administracion.dto.EstadoUsuarioRequest;
-import cl.paris.marketplace.ms.administracion.service.AdminService;
-import jakarta.validation.Valid;
+package cl.paris.marketplace.ms.administracion.service;
 
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.parameters.RequestBody;
-import io.swagger.v3.oas.annotations.media.ExampleObject;
-import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.tags.Tag;
- 
 import java.util.List;
 import java.util.UUID;
- 
-@RestController
-@RequestMapping("/api/admin")
-@PreAuthorize("hasRole('ADMIN')")
-@Tag(name = "Administración", description = "Operaciones de auditoría, moderación de productos y gestión de estado de usuarios")
-public class AdminController {
- 
-    private final AdminService adminService;
- 
-    public AdminController(AdminService adminService) {
-        this.adminService = adminService;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import cl.paris.marketplace.ms.administracion.client.ProductoClient;
+import cl.paris.marketplace.ms.administracion.client.ProveedorClient;
+import cl.paris.marketplace.ms.administracion.client.UsuarioClient;
+import cl.paris.marketplace.ms.administracion.dto.ActualizarEstadoDocumentoRequest;
+import cl.paris.marketplace.ms.administracion.dto.AdminAccionRequest;
+import cl.paris.marketplace.ms.administracion.dto.AdminAccionResponse;
+import cl.paris.marketplace.ms.administracion.dto.EstadoUsuarioRequest;
+import cl.paris.marketplace.ms.administracion.dto.ModerarProductoRequest;
+import cl.paris.marketplace.ms.administracion.mapper.AdminMapper;
+import cl.paris.marketplace.ms.administracion.model.LogAuditoria;
+import cl.paris.marketplace.ms.administracion.repository.LogAuditoriaRepository;
+
+@Service
+public class AdminService {
+
+    private final LogAuditoriaRepository logRepository;
+    private final AdminMapper adminMapper;
+    private final ProductoClient productoClient;
+    private final UsuarioClient usuarioClient;
+    private final ProveedorClient proveedorClient;
+
+    public AdminService(
+            LogAuditoriaRepository logRepository, 
+            AdminMapper adminMapper,
+            ProductoClient productoClient,
+            UsuarioClient usuarioClient,
+            ProveedorClient proveedorClient) {
+        this.logRepository = logRepository;
+        this.adminMapper = adminMapper;
+        this.productoClient = productoClient;
+        this.usuarioClient = usuarioClient;
+        this.proveedorClient = proveedorClient;
     }
- 
-    @Operation(summary = "Registrar acción manual", description = "Registra una acción de auditoría ejecutada por un administrador")
-    @ApiResponse(responseCode = "201", description = "Acción registrada exitosamente")
-    @RequestBody(
-        content = @Content(
-            examples = @ExampleObject(
-                name = "EjemploAdminAccion",
-                value = "{\n  \"accion\": \"Bloqueo de categoría\",\n  \"detalle\": \"Se bloqueó la categoría de electrónica temporalmente por revisión\"\n}"
-            )
-        )
-    )
-    @PostMapping("/auditoria")
-    public ResponseEntity<AdminAccionResponse> registrarAccionManual(
-            @Valid @org.springframework.web.bind.annotation.RequestBody AdminAccionRequest request,
-            Authentication authentication) {
+
+    @Transactional
+    public AdminAccionResponse registrarAccionManual(AdminAccionRequest request, UUID adminId) {
+        if (request.accion() == null || request.accion().trim().isEmpty()) {
+            throw new RuntimeException("El tipo de acción de auditoría no puede estar vacío.");
+        }
+
+        LogAuditoria log = adminMapper.toEntity(request);
+        log.setUsuarioId(adminId); 
         
-        UUID adminId = UUID.fromString(authentication.getCredentials().toString());
-        AdminAccionResponse response = adminService.registrarAccionManual(request, adminId);
-        return new ResponseEntity<>(response, HttpStatus.CREATED);
+        LogAuditoria logGuardado = logRepository.save(log);
+        return adminMapper.toResponse(logGuardado);
     }
- 
-    @Operation(summary = "Listar historial completo", description = "Obtiene todo el historial de auditoría de los administradores")
-    @ApiResponse(responseCode = "200", description = "Historial obtenido correctamente")
-    @GetMapping("/auditoria")
-    public ResponseEntity<List<AdminAccionResponse>> listarHistorial() {
-        return ResponseEntity.ok(adminService.listarHistorial());
+
+    @Transactional(readOnly = true)
+    public List<AdminAccionResponse> listarHistorial() {
+        return logRepository.findAll().stream()
+                .map(adminMapper::toResponse)
+                .toList(); 
     }
- 
-    @Operation(summary = "Listar acciones por administrador", description = "Obtiene el historial de auditoría filtrado por un ID de administrador específico")
-    @ApiResponse(responseCode = "200", description = "Historial del administrador obtenido correctamente")
-    @GetMapping("/auditoria/usuario/{usuarioId}")
-    public ResponseEntity<List<AdminAccionResponse>> listarPorUsuarioAdmin(@PathVariable UUID usuarioId) {
-        return ResponseEntity.ok(adminService.listarPorUsuarioAdmin(usuarioId));
+
+    @Transactional(readOnly = true)
+    public List<AdminAccionResponse> listarPorUsuarioAdmin(UUID usuarioId) {
+        List<LogAuditoria> logs = logRepository.findByUsuarioIdOrderByFechaAccionDesc(usuarioId);
+        if (logs.isEmpty()) {
+            throw new RuntimeException("No se encontraron registros de auditoría para el administrador especificado.");
+        }
+        return logs.stream().map(adminMapper::toResponse).toList();
     }
- 
-    @Operation(summary = "Moderar estado de producto", description = "Aprueba o rechaza un producto en el marketplace")
-    @ApiResponse(responseCode = "201", description = "Producto moderado correctamente")
-    @RequestBody(
-        content = @Content(
-            examples = @ExampleObject(
-                name = "EjemploModerarProducto",
-                value = "{\n  \"productoId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"estado\": \"APROBADO\",\n  \"motivo\": \"El producto cumple con todas las políticas fotográficas y de descripción\"\n}"
-            )
-        )
-    )
-    @PostMapping("/productos/moderar")
-    public ResponseEntity<AdminAccionResponse> moderarProducto(
-            @Valid @org.springframework.web.bind.annotation.RequestBody ModerarProductoRequest request,
-            Authentication authentication) {
+
+   @Transactional
+    public AdminAccionResponse moderarProducto(ModerarProductoRequest request, UUID adminId) {
+        String estadoUpper = request.estado().toUpperCase();
+        if (!estadoUpper.equals("APROBADO") && !estadoUpper.equals("RECHAZADO")) {
+            throw new RuntimeException("Estado de moderación inválido. Debe ser 'APROBADO' o 'RECHAZADO'.");
+        }
+
+       try {
+            productoClient.actualizarEstadoModeracion(request.productoId(), estadoUpper);
+        } catch (Exception e) { 
+            System.err.println("=== ERROR INESPERADO AL LLAMAR A MS-PRODUCTOS ===");
+            System.err.println("Clase del error: " + e.getClass().getName());
+            System.err.println("Mensaje: " + e.getMessage());
+            e.printStackTrace(); 
+            throw new RuntimeException("Fallo al intentar aplicar la moderación. Revisa la consola.");
+        }
+
+
+        String detalleLog = String.format("El administrador cambió el estado del producto ID [%s] a [%s]. Motivo: %s", 
+                request.productoId(), estadoUpper, request.motivo());
+
+        LogAuditoria log = new LogAuditoria();
+        log.setUsuarioId(adminId);
+        log.setAccion("MODERAR_PRODUCTO");
+        log.setDetalle(detalleLog);
+
+        LogAuditoria guardado = logRepository.save(log);
+        return adminMapper.toResponse(guardado);
+    }
+
+   @Transactional
+    public AdminAccionResponse cambiarEstadoUsuario(EstadoUsuarioRequest request, UUID adminId) {
+
+       try {
+            usuarioClient.actualizarEstadoBaneo(request.usuarioId(), request.baneo());
+        } catch (Exception e) { 
+            System.err.println("=== ERROR INESPERADO AL LLAMAR A MS-USUARIOS ===");
+            System.err.println("Clase del error: " + e.getClass().getName());
+            System.err.println("Mensaje: " + e.getMessage());
+            e.printStackTrace();
+            throw new RuntimeException("Fallo al intentar cambiar el estado del usuario.");
+        }
+
+        String accionTipo = request.baneo() ? "BANEAR_USUARIO" : "ACTIVAR_USUARIO";
+        String detalleLog = String.format("El administrador aplicó [%s] al usuario ID [%s]. Razón: %s", 
+                accionTipo, request.usuarioId(), request.razon());
+
+        LogAuditoria log = new LogAuditoria();
+        log.setUsuarioId(adminId);
+        log.setAccion(accionTipo);
+        log.setDetalle(detalleLog);
+
+        LogAuditoria guardado = logRepository.save(log);
+        return adminMapper.toResponse(guardado);
+    }
+
+    @Transactional
+    public AdminAccionResponse actualizarEstadoDocumento(UUID documentoId, ActualizarEstadoDocumentoRequest request, UUID adminId) {
+        String estadoUpper = request.estado().toUpperCase();
         
-        UUID adminId = UUID.fromString(authentication.getCredentials().toString());
-        AdminAccionResponse response = adminService.moderarProducto(request, adminId);
-        return new ResponseEntity<>(response, HttpStatus.CREATED);
-    }
- 
-    @Operation(summary = "Cambiar estado de baneo de usuario", description = "Permite banear o desbanear a un usuario del marketplace indicando una razón")
-    @ApiResponse(responseCode = "201", description = "Estado del usuario cambiado correctamente")
-    @RequestBody(
-        content = @Content(
-            examples = @ExampleObject(
-                name = "EjemploEstadoUsuario",
-                value = "{\n  \"usuarioId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"baneo\": true,\n  \"razon\": \"Venta de artículos falsificados, reincidente\"\n}"
-            )
-        )
-    )
-    @PostMapping("/usuarios/estado")
-    public ResponseEntity<AdminAccionResponse> cambiarEstadoUsuario(
-            @Valid @org.springframework.web.bind.annotation.RequestBody EstadoUsuarioRequest request,
-            Authentication authentication) {
-        
-        UUID adminId = UUID.fromString(authentication.getCredentials().toString());
-        AdminAccionResponse response = adminService.cambiarEstadoUsuario(request, adminId);
-        return new ResponseEntity<>(response, HttpStatus.CREATED);
+        if (!estadoUpper.equals("APROBADO") && !estadoUpper.equals("RECHAZADO") && !estadoUpper.equals("PENDIENTE")) {
+            throw new RuntimeException("Estado de documento inválido.");
+        }
+
+        try {
+            proveedorClient.actualizarEstadoDocumento(documentoId, request);
+        } catch (Exception e) { 
+            System.err.println("=== ERROR INESPERADO AL LLAMAR A MS-PROVEEDORES ===");
+            System.err.println("Clase del error: " + e.getClass().getName());
+            System.err.println("Mensaje: " + e.getMessage());
+            e.printStackTrace(); 
+            throw new RuntimeException("Fallo al intentar aplicar el cambio de estado del documento. Revisa la consola.");
+        }
+
+        String detalleLog = String.format("El administrador cambió el estado del documento ID [%s] a [%s].", 
+                documentoId, estadoUpper);
+
+        LogAuditoria log = new LogAuditoria();
+        log.setUsuarioId(adminId);
+        log.setAccion("MODERAR_DOCUMENTO");
+        log.setDetalle(detalleLog);
+
+        LogAuditoria guardado = logRepository.save(log);
+        return adminMapper.toResponse(guardado);
     }
 }
