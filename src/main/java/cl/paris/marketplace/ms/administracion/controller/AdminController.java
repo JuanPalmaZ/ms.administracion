@@ -21,6 +21,7 @@ import cl.paris.marketplace.ms.administracion.dto.EstadoUsuarioRequest;
 import cl.paris.marketplace.ms.administracion.dto.ModerarProductoRequest;
 import cl.paris.marketplace.ms.administracion.service.AdminService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -40,8 +41,12 @@ public class AdminController {
     @Operation(summary = "Registrar acción manual", description = "Registra una acción manual de auditoría o administración")
     @ApiResponse(responseCode = "200", description = "Acción manual registrada exitosamente")
     @io.swagger.v3.oas.annotations.parameters.RequestBody(
-        content = @io.swagger.v3.oas.annotations.media.Content(
-            examples = @ExampleObject(value = "{\n  \"accion\": \"BLOQUEO_PREVENTIVO\",\n  \"detalle\": \"Se detectaron múltiples intentos de acceso fallidos\"\n}")
+        content = @Content(
+            mediaType = "application/json",
+            examples = @ExampleObject(
+                name = "EjemploAccionManual",
+                value = "{\n  \"accion\": \"BLOQUEO_PREVENTIVO\",\n  \"detalle\": \"Se detectaron múltiples intentos de acceso fallidos\"\n}"
+            )
         )
     )
     @PostMapping("/acciones")
@@ -73,8 +78,12 @@ public class AdminController {
     @Operation(summary = "Moderar un producto", description = "Permite a un administrador aprobar o rechazar un producto publicado")
     @ApiResponse(responseCode = "200", description = "Producto moderado exitosamente")
     @io.swagger.v3.oas.annotations.parameters.RequestBody(
-        content = @io.swagger.v3.oas.annotations.media.Content(
-            examples = @ExampleObject(value = "{\n  \"productoId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"estado\": \"APROBADO\",\n  \"motivo\": \"El producto cumple con todas las reglas del marketplace\"\n}")
+        content = @Content(
+            mediaType = "application/json",
+            examples = @ExampleObject(
+                name = "EjemploModerarProducto",
+                value = "{\n  \"productoId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"estado\": \"APROBADO\",\n  \"motivo\": \"El producto cumple con todas las reglas del marketplace\"\n}"
+            )
         )
     )
     @PutMapping("/productos/moderar")
@@ -89,8 +98,12 @@ public class AdminController {
     @Operation(summary = "Cambiar estado de un usuario", description = "Permite banear o desbanear a un usuario especificando una razón")
     @ApiResponse(responseCode = "200", description = "Estado del usuario actualizado exitosamente")
     @io.swagger.v3.oas.annotations.parameters.RequestBody(
-        content = @io.swagger.v3.oas.annotations.media.Content(
-            examples = @ExampleObject(value = "{\n  \"usuarioId\": \"987e6543-e21b-12d3-a456-426614174000\",\n  \"baneo\": true,\n  \"razon\": \"Infracción reiterada de términos y condiciones\"\n}")
+        content = @Content(
+            mediaType = "application/json",
+            examples = @ExampleObject(
+                name = "EjemploEstadoUsuario",
+                value = "{\n  \"usuarioId\": \"987e6543-e21b-12d3-a456-426614174000\",\n  \"baneo\": true,\n  \"razon\": \"Infracción reiterada de términos y condiciones\"\n}"
+            )
         )
     )
     @PutMapping("/usuarios/estado")
@@ -105,8 +118,12 @@ public class AdminController {
     @Operation(summary = "Actualizar estado de un documento", description = "Modifica el estado de revisión de un documento asociado a un usuario/producto")
     @ApiResponse(responseCode = "200", description = "Estado del documento actualizado correctamente")
     @io.swagger.v3.oas.annotations.parameters.RequestBody(
-        content = @io.swagger.v3.oas.annotations.media.Content(
-            examples = @ExampleObject(value = "{\n  \"estado\": \"RECHAZADO\"\n}")
+        content = @Content(
+            mediaType = "application/json",
+            examples = @ExampleObject(
+                name = "EjemploActualizarDocumento",
+                value = "{\n  \"estado\": \"RECHAZADO\"\n}"
+            )
         )
     )
     @PutMapping("/documentos/{documentoId}/estado")
