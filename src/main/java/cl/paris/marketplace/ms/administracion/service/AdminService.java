@@ -7,7 +7,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import cl.paris.marketplace.ms.administracion.client.ProductoClient;
+import cl.paris.marketplace.ms.administracion.client.ProveedorClient;
 import cl.paris.marketplace.ms.administracion.client.UsuarioClient;
+import cl.paris.marketplace.ms.administracion.dto.ActualizarEstadoDocumentoRequest;
 import cl.paris.marketplace.ms.administracion.dto.AdminAccionRequest;
 import cl.paris.marketplace.ms.administracion.dto.AdminAccionResponse;
 import cl.paris.marketplace.ms.administracion.dto.EstadoUsuarioRequest;
@@ -23,16 +25,19 @@ public class AdminService {
     private final AdminMapper adminMapper;
     private final ProductoClient productoClient;
     private final UsuarioClient usuarioClient;
+    private final ProveedorClient proveedorClient;
 
     public AdminService(
             LogAuditoriaRepository logRepository, 
             AdminMapper adminMapper,
             ProductoClient productoClient,
-            UsuarioClient usuarioClient) {
+            UsuarioClient usuarioClient,
+            ProveedorClient proveedorClient) {
         this.logRepository = logRepository;
         this.adminMapper = adminMapper;
         this.productoClient = productoClient;
         this.usuarioClient = usuarioClient;
+        this.proveedorClient = proveedorClient;
     }
 
     @Transactional
@@ -120,4 +125,33 @@ public class AdminService {
         return adminMapper.toResponse(guardado);
     }
 
+    @Transactional
+    public AdminAccionResponse actualizarEstadoDocumento(UUID documentoId, ActualizarEstadoDocumentoRequest request, UUID adminId) {
+        String estadoUpper = request.estado().toUpperCase();
+        
+        if (!estadoUpper.equals("APROBADO") && !estadoUpper.equals("RECHAZADO") && !estadoUpper.equals("PENDIENTE")) {
+            throw new RuntimeException("Estado de documento inválido.");
+        }
+
+        try {
+            proveedorClient.actualizarEstadoDocumento(documentoId, request);
+        } catch (Exception e) { 
+            System.err.println("=== ERROR INESPERADO AL LLAMAR A MS-PROVEEDORES ===");
+            System.err.println("Clase del error: " + e.getClass().getName());
+            System.err.println("Mensaje: " + e.getMessage());
+            e.printStackTrace(); 
+            throw new RuntimeException("Fallo al intentar aplicar el cambio de estado del documento. Revisa la consola.");
+        }
+
+        String detalleLog = String.format("El administrador cambió el estado del documento ID [%s] a [%s].", 
+                documentoId, estadoUpper);
+
+        LogAuditoria log = new LogAuditoria();
+        log.setUsuarioId(adminId);
+        log.setAccion("MODERAR_DOCUMENTO");
+        log.setDetalle(detalleLog);
+
+        LogAuditoria guardado = logRepository.save(log);
+        return adminMapper.toResponse(guardado);
+    }
 }
